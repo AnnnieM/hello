@@ -1,0 +1,165 @@
+（Sub 按钮1_Click()
+Dim r1 As Integer, r5 As Integer, r8 As Integer
+
+r1 = Sheet1.Range("C65536").End(xlUp).Row
+r5 = Sheet5.Range("D65536").End(xlUp).Row
+r8 = Sheet8.Range("D65536").End(xlUp).Row
+
+For i = 5 To r1
+    Sheet1.Range("Q" & i).Value = 0
+    Sheet1.Range("E" & i).Value = 0
+    For j = 2 To r5
+        If Sheet5.Range("D" & j).Value = Sheet1.Range("C" & i).Value Then
+            If Weekday(Sheet5.Range("F" & j).Value) <> 1 And Weekday(Sheet5.Range("F" & j).Value) <> 7 Then
+                Sheet1.Range("E" & i).Value = Sheet1.Range("E" & i).Value + 1
+                If Sheet5.Range("P" & j).Value = "True" Then
+                    Sheet1.Range("Q" & i).Value = Sheet1.Range("Q" & i).Value + 1
+                Else
+                    If Sheet5.Range("J" & j).Value = Null Or Sheet5.Range("K" & j).Value = Null Then
+                        Sheet1.Range("R" & i).Value = Sheet1.Range("R" & i).Value + 1
+                    End If
+                End If
+            End If
+        End If
+    Next
+    For m = 2 To r8
+        If Sheet8.Range("D" & m).Value = Sheet1.Range("C" & i).Value Then
+            If Sheet8.Range("H" & m).Value = "事假" Then
+                If Sheet8.Range("S" & m).Value = Null Then
+                    Sheet1.Range("H" & i).Value = Sheet1.Range("H" & i).Value + Sheet8.Range("R" & m).Value * 1 / 8
+                Else
+                    Sheet1.Range("H" & i).Value = Sheet1.Range("H" & i).Value + Sheet8.Range("S" & m).Value * 1 / 8
+                End If
+            ElseIf Sheet8.Range("H" & m).Value = "病假" Then
+                If Sheet6.Range("S" & m).Value = Null Then
+                    Sheet1.Range("I" & i).Value = Sheet1.Range("I" & i).Value + Sheet8.Range("R" & m).Value * 1 / 8
+                Else
+                    Sheet1.Range("I" & i).Value = Sheet1.Range("I" & i).Value + Sheet8.Range("S" & m).Value * 1 / 8
+                End If
+            ElseIf Sheet8.Range("H" & m).Value = "年休假" Then
+                If Sheet8.Range("S" & m).Value = Null Then
+                    Sheet1.Range("J" & i).Value = Sheet1.Range("J" & i).Value + Sheet8.Range("R" & m).Value * 1 / 8
+                Else
+                    Sheet1.Range("J" & i).Value = Sheet1.Range("J" & i).Value + Sheet8.Range("S" & m).Value * 1 / 8
+                End If
+            ElseIf Sheet8.Range("H" & m).Value = "丧假" Or Sheet8.Range("H" & m).Value = "婚假" Then
+                If Sheet8.Range("S" & m).Value = Null Then
+                    Sheet1.Range("K" & i).Value = Sheet1.Range("K" & i).Value + Sheet8.Range("R" & m).Value * 1 / 8
+                Else
+                    Sheet1.Range("K" & i).Value = Sheet1.Range("K" & i).Value + Sheet8.Range("S" & m).Value * 1 / 8
+                End If
+            ElseIf Sheet8.Range("H" & m).Value = "产假/陪产假" Then
+                If Sheet8.Range("S" & m).Value = Null Then
+                    Sheet1.Range("L" & i).Value = Sheet1.Range("L" & i).Value + Sheet8.Range("R" & m).Value * 1 / 8
+                Else
+                    Sheet1.Range("L" & i).Value = Sheet1.Range("L" & i).Value + Sheet8.Range("S" & m).Value * 1 / 8
+                End If
+            ElseIf Sheet8.Range("H" & m).Value = "哺乳假" Then
+                If Sheet8.Range("S" & m).Value = Null Then
+                    Sheet1.Range("M" & i).Value = Sheet1.Range("M" & i).Value + Sheet8.Range("R" & m).Value * 1 / 8
+                Else
+                    Sheet1.Range("M" & i).Value = Sheet1.Range("M" & i).Value + Sheet8.Range("S" & m).Value * 1 / 8
+                End If
+            End If
+        End If
+    Next
+Next
+End Sub
+）
+
+
+with thrown as(
+select distinct s.product,ticker_n,substring(ticker_n from length(s.product)+1 for 4)::integer as com
+from future.mv_safe_spread s
+join future.product_not_throw as t on to_char(expiredate_x,'MM')::integer =t.month 
+and s.product=t.product and expiredate_x>(current_date-interval'1 day')
+order by ticker_n
+)
+,count_thrown as (
+select product,count(*) as p_con
+from thrown t
+group by t.product
+order by product)
+,pro as(
+select product,count(month) as cou from future.product_not_throw 
+group by product)
+,para as(
+select
+  t."time",
+  t."product",
+  t."ticker_n",
+  t."ticker_f",
+  to_char(t.expiredate_x,'YYMM')::integer as com_n,
+  to_char(t.expiredate_y,'YYMM')::integer as com_f
+from future."mv_safe_spread" t
+where "openinterest_x" >${openinterest:raw} and "openinterest_y">${openinterest:raw} 
+and  t.ticker_n not in (select ticker_n from thrown)
+and upper("product") in (select distinct product_code from future.exchange_product_info
+except select product from pro where cou=12
+order by product_code) and "time" in (select max(time) from future.mv_safe_spread) 
+order by "time" desc,"product","ticker_n","ticker_f")
+
+,save as(
+select distinct p.product,p.ticker_n,ticker_f,com from para p
+join thrown as t on t.product=p.product
+where (com_n<com and com_f<=com) or (com_n>com and com_f>com))
+
+,con as(select product,ticker_n,ticker_f,count(*)as s_con
+from save 
+group by product,ticker_n,ticker_f)
+
+,save_ticker as(
+(select t.product,ticker_n,ticker_f
+from con c
+join count_thrown as t on t.product=c.product and c.s_con=t.p_con)
+union all(
+select distinct product,ticker_n,ticker_f from para
+where product not in (select distinct product from thrown))
+order by product,ticker_n,ticker_f)
+
+,final as (
+select time,p.product,p.ticker_n,p.ticker_f,"pricetick","total_loss","lastprice_x","lastprice_y","openinterest_x",
+	"openinterest_y","safe_spread","current_spread","spread_rate","multiplier" 
+from future.mv_safe_spread p
+right join save_ticker as st on st.ticker_n=p.ticker_n and st.ticker_f=p.ticker_f
+order by p.product,p.ticker_n,p.ticker_f)
+
+,cal_n as(
+select "ticker_n",avg(lastprice_x) as "closeavg_x",
+  min("lastprice_x") as "closemin_x",
+  max("lastprice_x")as "closemax_x"
+from final
+group by "ticker_n"),
+
+cal_f as(
+select f."ticker_f",avg(f."lastprice_y") as "closeavg_y",
+  min(f."lastprice_y") as "closemin_y",
+  max(f."lastprice_y")as "closemax_y"
+from final f
+group by f."ticker_f")
+
+select s."time" as "数据读取时间",
+  "product" as "品种",
+  s."ticker_n" as "近月合约",
+  s."ticker_f" as "远月合约",
+  s."lastprice_x" as "近月最新价",
+  s."lastprice_y" as "远月最新价",
+  "current_spread" as "价差",
+  "safe_spread" as "无风险价差",
+  "total_loss" as "总亏损",
+  "spread_rate" as "价差比率",
+  "openinterest_x" as "近月合约持仓量",
+  "openinterest_y" as "远月合约持仓量",
+  cn.avg as "近月5日均价",
+  cn.min as "近月5日最低价",
+  cn.max as "近月5日最高价",
+  cf.avg as "远月5日均价",
+  cf.min as "远月5日最低价",
+  cf.max as "远月5日最高价"
+from final s
+join future."v-future_avgminmax" cn on s."ticker_n"=cn.instrument and s.time=cn.time
+join future."v-future_avgminmax"cf on s."ticker_f"=cf.instrument and s.time=cf.time
+where s."time"=(select max("time") from final) and product in (${product:sqlstring})
+order by s."product",s."ticker_n",s."ticker_f"
+
+
